@@ -1,205 +1,211 @@
-"""
-utils/excel_handler.py
-
-Module Purpose:
----------------
-This module provides utilities for working with Excel-based service data.
-It focuses on reading workbook sheets, searching for service IDs, cleaning extracted
-codes, and generating formatted action lines for downstream automation.
-
-Core Responsibilities:
-- Parse Excel workbooks using pandas + openpyxl.
-- Perform case-insensitive lookups of 'service_id' entries.
-- Extract and sanitize sub-identifiers or numeric codes.
-- Produce preformatted action lines for automation pipelines.
-
-Design Notes:
--------------
-- Logging is centralized using the project's custom logger.
-- Emphasis is placed on robustness and traceability: every operation logs its success/failure.
-- Built for extensibility — e.g., adding support for multiple service lookup fields or
-  configurable formatting rules.
-"""
-
 from typing import List, Iterable
 import pandas as pd
 from utils.logger import setup_logger  # Project-wide logging utility
 
-# Instantiate a module-specific logger for fine-grained logging context
+# Create a module-specific logger for Excel handling operations
 logger = setup_logger("excel_handler")
 
 
 class ExcelHandler:
-    """Encapsulates Excel reading and service code extraction logic."""
+    """
+    Encapsulates Excel reading and service code extraction logic.
+
+    Responsibilities:
+    -----------------
+    - Load Excel files efficiently using pandas + openpyxl.
+    - Retrieve sheet names.
+    - Extract codes for specific Service_IDs.
+    - Extract all codes from a sheet for premium generation.
+    - Clean and format codes into automation-ready action lines.
+    """
 
     def __init__(self, excel_path: str):
         """
-        Initialize an ExcelHandler instance and attempt to load the workbook.
+        Initialize an ExcelHandler instance and load the workbook.
 
         Args:
             excel_path (str): Path to the Excel file.
 
-        Responsibilities:
-            - Initialize a pandas.ExcelFile object (lazy-loading for performance).
-            - Cache sheet names for future queries.
-            - Log file load events and handle access errors gracefully.
-
-        Raises:
-            FileNotFoundError: Raised when the Excel file cannot be read.
+        Behavior:
+        ---------
+        - Attempts to load the workbook using pandas.ExcelFile.
+        - Logs successful load or raises FileNotFoundError on failure.
         """
-        self.path = excel_path  # Persist Excel file path for reference/logging
-
+        self.path = excel_path
         try:
-            # Using pandas.ExcelFile for deferred reading (memory-efficient with multiple sheets)
+            # Lazy-load Excel file for memory efficiency
             self._excel = pd.ExcelFile(self.path, engine="openpyxl")
             logger.info("Successfully loaded Excel file: %s", self.path)
         except Exception as e:
-            # Log the error stack trace and raise a descriptive exception
             logger.exception("Failed to open Excel file: %s", e)
             raise FileNotFoundError(f"Could not open Excel file: {e}")
 
     def sheet_names(self) -> List[str]:
         """
-        Return all available worksheet names from the loaded Excel file.
+        Retrieve all sheet names from the loaded Excel file.
 
         Returns:
-            List[str]: List of sheet names present in the workbook.
+            List[str]: Names of all worksheets in the workbook.
         """
-        # ExcelFile automatically stores all sheet names upon initialization
         return self._excel.sheet_names
 
     def find_service_codes(self, sheet_name: str, service_id: str) -> List[str]:
         """
-        Search a specific sheet for entries matching a given service_id.
-
-        Detailed Flow:
-        --------------
-        1. Parse the given sheet into a DataFrame.
-        2. Normalize column names to lowercase.
-        3. Identify the 'service_id' column dynamically (case-insensitive search).
-        4. Match the target service ID, allowing for both '1056' and 'Service_1056' formats.
-        5. Extract all corresponding 'sub-identifier' values.
-        6. Deduplicate and return the clean list of codes.
+        Extract codes corresponding to a specific Service_ID in a sheet.
 
         Args:
             sheet_name (str): Sheet to search within.
-            service_id (str): Service ID to locate (numeric or prefixed).
+            service_id (str): Target service ID (numeric or prefixed).
 
         Returns:
-            List[str]: A list of unique codes corresponding to the given service.
+            List[str]: Unique codes for the service, or empty list if none found.
+
+        Behavior:
+        ---------
+        - Parses the sheet into a DataFrame.
+        - Dynamically locates 'service_id' column.
+        - Matches the normalized service_id (ensures 'service_' prefix).
+        - Extracts codes from the 'sub-identifier' column.
+        - Deduplicates codes while preserving order.
+        - Logs results for auditing.
         """
         try:
-            # Attempt to parse the target sheet; defer reading until now for memory efficiency
             df = self._excel.parse(sheet_name)
         except Exception as e:
-            # Log but don't crash if one sheet is malformed or inaccessible
             logger.warning("Unable to read sheet '%s': %s", sheet_name, e)
             return []
 
-        # Standardize all column names (critical for case-insensitive matching)
+        # Standardize column names for case-insensitive matching
         df.columns = [str(c).lower().strip() for c in df.columns]
 
-        # Locate the service_id column dynamically — handles variations like 'ServiceID', 'service_id', etc.
+        # Find the column containing the Service_ID
         svc_col = next((c for c in df.columns if "service" in c and "id" in c), None)
         if not svc_col:
             logger.warning("Sheet '%s' missing a 'service_id' column.", sheet_name)
             return []
 
-        # Normalize provided service ID (ensure consistent 'service_' prefix)
+        # Normalize Service_ID (add 'service_' prefix if missing)
         normalized_service = str(service_id).strip()
         if not normalized_service.lower().startswith("service_"):
             normalized_service = f"service_{normalized_service}"
 
-        # Create a case-insensitive match mask for the target service
+        # Create boolean mask for matching rows
         mask = df[svc_col].astype(str).str.strip().str.lower() == normalized_service.lower()
         filtered = df.loc[mask]
 
-        # Early exit if no matching entries were found
         if filtered.empty:
             logger.info("No matching entries for %s in sheet '%s'.", normalized_service, sheet_name)
             return []
 
-        # Attempt to locate a sub-identifier column for code extraction
+        # Find the sub-identifier column to extract codes
         sub_col = next((c for c in df.columns if "sub" in c and "identifier" in c), None)
         if not sub_col:
             logger.warning("No 'sub-identifier' column found in sheet '%s'.", sheet_name)
             return []
 
-        # Extract non-null, non-empty sub-identifier values
+        # Extract non-null, stripped values and remove duplicates
         codes = [str(v).strip() for v in filtered[sub_col] if pd.notna(v) and str(v).strip()]
-
-        # Deduplicate results while preserving order
         unique_codes = list(dict.fromkeys(codes))
 
-        # Log summary of extraction results for auditing/debugging
         logger.info(
             "Extracted %d unique code(s) for %s from sheet '%s'.",
             len(unique_codes),
             normalized_service,
             sheet_name,
         )
+        return unique_codes
 
+    def extract_all_codes(self, sheet_name: str) -> List[str]:
+        """
+        Extract all codes from a sheet, independent of Service_ID.
+
+        Intended Use:
+        -------------
+        - When script generation is skipped.
+        - Generating premium short/long code files.
+        - Compiling a comprehensive list of all sub-identifiers.
+
+        Args:
+            sheet_name (str): Worksheet to extract codes from.
+
+        Returns:
+            List[str]: Unique codes extracted from the sheet.
+
+        Behavior:
+        ---------
+        - Loads the sheet into a DataFrame.
+        - Dynamically finds the 'sub-identifier' column.
+        - Extracts all non-null, non-empty values.
+        - Deduplicates results while preserving order.
+        - Logs the total number of extracted codes.
+        """
+        try:
+            df = self._excel.parse(sheet_name)
+        except Exception as e:
+            logger.warning("Unable to read sheet '%s' for code extraction: %s", sheet_name, e)
+            return []
+
+        df.columns = [str(c).lower().strip() for c in df.columns]
+
+        sub_col = next((c for c in df.columns if "sub" in c and "identifier" in c), None)
+        if not sub_col:
+            logger.warning("No 'sub-identifier' column found in sheet '%s'.", sheet_name)
+            return []
+
+        codes = [str(v).strip() for v in df[sub_col] if pd.notna(v) and str(v).strip()]
+        unique_codes = list(dict.fromkeys(codes))
+
+        logger.info("Extracted %d total code(s) from sheet '%s'.", len(unique_codes), sheet_name)
         return unique_codes
 
     @staticmethod
     def clean_codes(codes: Iterable[str]) -> List[str]:
         """
-        Clean and normalize raw extracted codes.
+        Clean and normalize raw codes for script usage.
 
-        Cleaning Rules:
-        ---------------
+        Rules:
+        ------
+        - Remove '?', spaces, and hyphens.
+        - Keep non-empty, meaningful codes.
         - Trim whitespace.
-        - Remove '?' characters.
-        - Retain '*' symbols (treated as valid wildcards).
-        - Remove spaces and hyphens.
-        - Skip empty or invalid results.
 
         Args:
-            codes (Iterable[str]): Iterable of raw code strings.
+            codes (Iterable[str]): Raw code strings.
 
         Returns:
-            List[str]: List of sanitized, non-empty codes.
+            List[str]: Cleaned codes.
         """
         cleaned = []
         for raw in codes:
             s = str(raw).strip()
             if not s:
-                continue  # Skip blank/whitespace-only entries
-
-            # Perform character-level sanitization (retain only meaningful symbols)
+                continue
             s = s.replace("?", "").replace(" ", "").replace("-", "")
             if s:
                 cleaned.append(s)
-
         return cleaned
 
     @staticmethod
     def format_action_lines(codes: Iterable[str], username: str) -> List[str]:
         """
-        Format cleaned service codes into standardized action strings.
+        Format codes into automation-ready action strings.
 
-        Example Output:
-            { "?.?.27840001402" }  : Actions SET_DEST_LA("cellfsc"),SET_ESME_GROUP(SAG_GROUP_1, A_ADDR)
+        Example format:
+        { "?.?.<code>" }  : Actions SET_DEST_LA("<username>"),SET_ESME_GROUP(SAG_GROUP_1, A_ADDR)
 
         Args:
-            codes (Iterable[str]): List of cleaned codes to format.
-            username (str): Username to embed within each formatted line.
+            codes (Iterable[str]): Cleaned codes to format.
+            username (str): Destination username to embed in each line.
 
         Returns:
-            List[str]: List of fully formatted action strings for script generation or export.
+            List[str]: List of formatted action lines for script generation.
         """
         lines: List[str] = []
-
-        # Sanitize username input to prevent malformed output
         username = username.replace('"', "").replace("'", "")
-
-        # Construct the formatted action line for each code
         for code in codes:
-            # Maintain a consistent pattern used by the automation system
             line = (
                 f'{{ "?.?.{code}" }}  : Actions '
                 f'SET_DEST_LA("{username}"),SET_ESME_GROUP(SAG_GROUP_1, A_ADDR)'
             )
             lines.append(line)
-
         return lines
