@@ -51,11 +51,17 @@ It allows users to:
 ## ✨ Features
 
 ✅ Interactive CLI with sheet selection (all or specific by number).
+
 ✅ Pre-generation summary showing record counts per Service_ID.
+
 ✅ Case-insensitive matching for Service_<ID> patterns.
+
 ✅ Automatic data cleaning (removes ?, trims spaces, fixes hyphens).
+
 ✅ Organized output directory structure (output/).
+
 ✅ Centralized logging in logs/activity.log.
+
 ✅ Graceful error handling for missing files, invalid sheets, or malformed input.
 
 ## ⚙️ Installation
@@ -158,22 +164,6 @@ output/
 Example Line:
 
 { "?.?.27840001402" } : Actions SET_DEST_LA("cellfsc"), SET_ESME_GROUP(SAG_GROUP_1, A_ADDR)
-
-## 🗂️ Project Structure
-excel-service-id-generator/
-│
-├─ data/                       # Example Excel files
-├─ logs/                       # Activity logs (activity.log)
-├─ output/                     # Generated scripts
-│
-├─ utils/
-│  ├─ excel_handler.py         # Excel reading, ID search, and code cleaning
-│  ├─ file_writer.py           # File writing helper
-│  └─ logger.py                # Centralized logging setup
-│
-├─ main.py                     # Interactive CLI entry point
-├─ requirements.txt            # Python dependencies
-└─ README.md                   # Project documentation
 
 ## 🧩 Algorithm & Data Structures
 Algorithm
