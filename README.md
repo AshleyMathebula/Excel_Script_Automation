@@ -64,21 +64,6 @@ It allows users to:
 
 ✅ Graceful error handling for missing files, invalid sheets, or malformed input.
 
-## ⚙️ Installation
-1. Clone the repository:
-git clone https://github.com/your-username/excel-service-id-generator.git
-cd excel-service-id-generator
-
-2. Create and activate a virtual environment:
-python -m venv venv
-Linux/macOS
-source venv/bin/activate
-Windows
-venv\Scripts\activate
-
-3. Install dependencies:
-pip install -r requirements.txt
-
 ## 🧩 Dependencies
 
 - pandas — Excel processing and data handling
